@@ -101,6 +101,117 @@ function qurban_send_watzap_message(string $phoneWa, string $message): array {
     return ['ok' => $ok, 'status_code' => $statusCode, 'response' => (string)$response, 'error' => $ok ? '' : 'HTTP ' . $statusCode];
 }
 
+function qurban_tripay_methods(): array {
+    return [
+        'QRIS' => 'Tripay QRIS',
+        'BRIVA' => 'BRI Virtual Account',
+        'BNIVA' => 'BNI Virtual Account',
+        'BSIVA' => 'BSI Virtual Account',
+        'MANDIRIVA' => 'Mandiri Virtual Account',
+        'PERMATAVA' => 'Permata Virtual Account',
+    ];
+}
+
+function qurban_current_base_url(): string {
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+    $scheme = $https ? 'https' : 'http';
+    $host = (string)($_SERVER['HTTP_HOST'] ?? 'localhost');
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '/detail_qurban.php'));
+    $dir = rtrim(str_replace('/detail_qurban.php', '', $script), '/');
+    return $scheme . '://' . $host . $dir;
+}
+
+/**
+ * Return: ['ok' => bool, 'checkout_url' => string, 'reference' => string, 'merchant_ref' => string, 'response' => string, 'error' => string]
+ */
+function qurban_create_tripay_transaction(array $params): array {
+    $apiKey = qurban_secret('TRIPAY_API_KEY');
+    $privateKey = qurban_secret('TRIPAY_PRIVATE_KEY');
+    $merchantCode = qurban_secret('TRIPAY_MERCHANT_CODE');
+    $apiBase = rtrim(qurban_secret('TRIPAY_API_BASE', 'https://tripay.co.id/api'), '/');
+    if ($apiKey === '' || $privateKey === '' || $merchantCode === '') {
+        return ['ok' => false, 'checkout_url' => '', 'reference' => '', 'merchant_ref' => '', 'response' => '', 'error' => 'Konfigurasi Tripay belum lengkap'];
+    }
+
+    $method = (string)($params['method'] ?? '');
+    $amount = (int)($params['amount'] ?? 0);
+    $name = trim((string)($params['name'] ?? ''));
+    $phone = trim((string)($params['phone'] ?? ''));
+    $programTitle = trim((string)($params['program_title'] ?? 'Qurban'));
+    $qty = max(1, (int)($params['qty'] ?? 1));
+    if ($method === '' || $amount <= 0 || $name === '' || $phone === '') {
+        return ['ok' => false, 'checkout_url' => '', 'reference' => '', 'merchant_ref' => '', 'response' => '', 'error' => 'Parameter Tripay tidak valid'];
+    }
+
+    $merchantRef = 'QURBAN-' . date('YmdHis') . '-' . random_int(100, 999);
+    $signature = hash_hmac('sha256', $merchantCode . $merchantRef . $amount, $privateKey);
+    $baseUrl = qurban_current_base_url();
+    $callbackUrl = qurban_secret('TRIPAY_CALLBACK_URL', $baseUrl . '/tripay_callback.php');
+    $returnUrl = qurban_secret('TRIPAY_RETURN_URL', $baseUrl . '/detail_qurban.php');
+
+    $payload = [
+        'method' => $method,
+        'merchant_ref' => $merchantRef,
+        'amount' => $amount,
+        'customer_name' => $name,
+        'customer_email' => qurban_secret('TRIPAY_CUSTOMER_EMAIL', 'qurban@kolaboraksi.com'),
+        'customer_phone' => qurban_normalize_phone_wa($phone),
+        'order_items' => [
+            [
+                'name' => $programTitle,
+                'price' => (int)($amount / $qty),
+                'quantity' => $qty,
+            ],
+        ],
+        'return_url' => $returnUrl,
+        'callback_url' => $callbackUrl,
+        'expired_time' => time() + 24 * 60 * 60,
+        'signature' => $signature,
+    ];
+
+    $ch = curl_init($apiBase . '/transaction/create');
+    if ($ch === false) {
+        return ['ok' => false, 'checkout_url' => '', 'reference' => '', 'merchant_ref' => $merchantRef, 'response' => '', 'error' => 'Gagal inisialisasi cURL'];
+    }
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query($payload),
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $apiKey,
+            'Accept: application/json',
+            'Content-Type: application/x-www-form-urlencoded',
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 25,
+    ]);
+    $response = curl_exec($ch);
+    $err = curl_error($ch);
+    $statusCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($response === false) {
+        return ['ok' => false, 'checkout_url' => '', 'reference' => '', 'merchant_ref' => $merchantRef, 'response' => '', 'error' => $err !== '' ? $err : 'Request Tripay gagal'];
+    }
+    $decoded = json_decode((string)$response, true);
+    $ok = is_array($decoded) && !empty($decoded['success']) && $statusCode >= 200 && $statusCode < 300;
+    $data = is_array($decoded) && isset($decoded['data']) && is_array($decoded['data']) ? $decoded['data'] : [];
+    $checkoutUrl = (string)($data['checkout_url'] ?? '');
+    $reference = (string)($data['reference'] ?? '');
+    $errMsg = '';
+    if (!$ok) {
+        $apiMsg = is_array($decoded) ? (string)($decoded['message'] ?? '') : '';
+        $errMsg = $apiMsg !== '' ? $apiMsg : ('HTTP ' . $statusCode);
+    }
+    return [
+        'ok' => $ok,
+        'checkout_url' => $checkoutUrl,
+        'reference' => $reference,
+        'merchant_ref' => $merchantRef,
+        'response' => (string)$response,
+        'error' => $errMsg,
+    ];
+}
+
 $qurban_programs = [
     'qurban-afrika-1per7' => [
         'id' => 'qurban-afrika-1per7',
@@ -204,7 +315,7 @@ for ($i = 1; $i <= $qty; $i++) {
 }
 $total = $qty * (int)$program['price_int'];
 
-$konfirmasi_ok = isset($_GET['terkirim']) && $_GET['terkirim'] === '1';
+$tripay_methods = qurban_tripay_methods();
 $konfirmasi_error = '';
 $repop = [
     'full_name' => '',
@@ -213,7 +324,7 @@ $repop = [
     'payment_method' => '',
 ];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['konfirmasi_qurban_tf']) && (string)$_POST['konfirmasi_qurban_tf'] === '1') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['buat_pembayaran_tripay']) && (string)$_POST['buat_pembayaran_tripay'] === '1') {
     $postProg = isset($_POST['program']) ? trim((string)$_POST['program']) : '';
     $pQty = isset($_POST['qty']) ? (int)$_POST['qty'] : 1;
     if ($pQty < 1) {
@@ -222,7 +333,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['konfirmasi_qurban_tf'
     if ($pQty > 20) {
         $pQty = 20;
     }
-    $allowedBank = ['bank_nagari', 'bsi', 'bsn'];
     $pay = isset($_POST['payment_method']) ? trim((string)$_POST['payment_method']) : '';
 
     $repop['full_name'] = trim((string)($_POST['full_name'] ?? ''));
@@ -238,63 +348,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['konfirmasi_qurban_tf'
 
     if ($postProg === '' || !isset($qurban_programs[$postProg])) {
         $konfirmasi_error = 'Program tidak valid. Silakan ulangi dari halaman detail.';
-    } elseif (!in_array($pay, $allowedBank, true)) {
-        $konfirmasi_error = 'Konfirmasi dengan bukti hanya untuk transfer bank. Pilih salah satu rekening bank.';
+    } elseif (!isset($tripay_methods[$pay])) {
+        $konfirmasi_error = 'Pilih channel pembayaran Tripay yang tersedia.';
     } elseif ($repop['full_name'] === '' || $repop['phone'] === '') {
         $konfirmasi_error = 'Nama lengkap dan nomor HP wajib diisi.';
-    } elseif (!isset($_FILES['bukti_tf']) || (int)$_FILES['bukti_tf']['error'] === UPLOAD_ERR_NO_FILE) {
-        $konfirmasi_error = 'Mohon lampirkan bukti transfer.';
-    } elseif ((int)$_FILES['bukti_tf']['error'] !== UPLOAD_ERR_OK) {
-        $konfirmasi_error = 'Gagal mengunggah bukti. Ukuran atau format file tidak didukung.';
     } else {
-        $ext = strtolower(pathinfo((string)$_FILES['bukti_tf']['name'], PATHINFO_EXTENSION));
-        $allowedExt = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
-        if (!in_array($ext, $allowedExt, true)) {
-            $konfirmasi_error = 'Format bukti tidak didukung. Gunakan JPG, PNG, WEBP, atau PDF.';
+        $amount = $pQty * (int)$qurban_programs[$postProg]['price_int'];
+        $tripay = qurban_create_tripay_transaction([
+            'method' => $pay,
+            'amount' => $amount,
+            'name' => $repop['full_name'],
+            'phone' => $repop['phone'],
+            'program_title' => $qurban_programs[$postProg]['title'],
+            'qty' => $pQty,
+        ]);
+        if (!$tripay['ok'] || $tripay['checkout_url'] === '') {
+            $konfirmasi_error = 'Gagal membuat transaksi Tripay. ' . ($tripay['error'] !== '' ? $tripay['error'] : 'Silakan coba lagi.');
         } else {
-            $uploadDir = __DIR__ . '/uploads/qurban_bukti';
-            if (!is_dir($uploadDir) && !@mkdir($uploadDir, 0755, true)) {
-                $konfirmasi_error = 'Folder unggahan belum siap. Hubungi admin.';
-            } else {
-                $safeBase = date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-                $dest = $uploadDir . '/' . $safeBase;
-                if (!move_uploaded_file($_FILES['bukti_tf']['tmp_name'], $dest)) {
-                    $konfirmasi_error = 'Gagal menyimpan bukti. Coba lagi.';
-                } else {
-                    $waPhone = qurban_normalize_phone_wa($repop['phone']);
-                    $waMessage = "Assalamu'alaikum " . $repop['full_name'] . ", konfirmasi qurban Anda sudah kami terima.\n"
-                        . 'Program: ' . $qurban_programs[$postProg]['title'] . "\n"
-                        . 'Jumlah paket: ' . $pQty . "\n"
-                        . 'Total: ' . rupiah($pQty * (int)$qurban_programs[$postProg]['price_int']) . "\n"
-                        . "Terima kasih telah berqurban bersama KolaborAksi.";
-                    $waSend = qurban_send_watzap_message($waPhone, $waMessage);
+            $waPhone = qurban_normalize_phone_wa($repop['phone']);
+            $waMessage = "Assalamu'alaikum " . $repop['full_name'] . ", invoice qurban Anda sudah dibuat.\n"
+                . 'Program: ' . $qurban_programs[$postProg]['title'] . "\n"
+                . 'Jumlah paket: ' . $pQty . "\n"
+                . 'Total: ' . rupiah($amount) . "\n"
+                . 'Silakan lanjut pembayaran di: ' . $tripay['checkout_url'];
+            $waSend = qurban_send_watzap_message($waPhone, $waMessage);
 
-                    $logPath = $uploadDir . '/konfirmasi.log';
-                    $logRow = [
-                        'waktu' => date('c'),
-                        'program' => $postProg,
-                        'qty' => $pQty,
-                        'nama' => $repop['full_name'],
-                        'hp' => $repop['phone'],
-                        'doa' => mb_substr($repop['doa'], 0, 200),
-                        'payment_method' => $pay,
-                        'bukti_file' => $safeBase,
-                        'tripay_api_configured' => qurban_secret('TRIPAY_API_KEY') !== '' && qurban_secret('TRIPAY_PRIVATE_KEY') !== '',
-                        'watzap_send_ok' => $waSend['ok'],
-                        'watzap_status_code' => $waSend['status_code'],
-                        'watzap_error' => $waSend['error'],
-                        'watzap_response' => mb_substr($waSend['response'], 0, 1000),
-                    ];
-                    @file_put_contents($logPath, json_encode($logRow, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
-
-                    $redir = ['program' => $postProg, 'step' => 'biodata', 'qty' => $pQty, 'terkirim' => '1'];
-                    for ($i = 1; $i <= $pQty; $i++) {
-                        $redir['nama_hewan_' . $i] = $postPekurban[$i] ?? '';
-                    }
-                    header('Location: detail_qurban.php?' . http_build_query($redir));
-                    exit;
-                }
+            $logDir = __DIR__ . '/uploads/qurban_bukti';
+            if (!is_dir($logDir)) {
+                @mkdir($logDir, 0755, true);
             }
+            $logPath = $logDir . '/tripay_create.log';
+            $logRow = [
+                'waktu' => date('c'),
+                'program' => $postProg,
+                'qty' => $pQty,
+                'nama' => $repop['full_name'],
+                'hp' => $repop['phone'],
+                'doa' => mb_substr($repop['doa'], 0, 200),
+                'payment_method' => $pay,
+                'tripay_reference' => $tripay['reference'],
+                'tripay_merchant_ref' => $tripay['merchant_ref'],
+                'tripay_checkout_url' => $tripay['checkout_url'],
+                'tripay_response' => mb_substr($tripay['response'], 0, 1500),
+                'watzap_send_ok' => $waSend['ok'],
+                'watzap_status_code' => $waSend['status_code'],
+                'watzap_error' => $waSend['error'],
+                'watzap_response' => mb_substr($waSend['response'], 0, 1000),
+            ];
+            @file_put_contents($logPath, json_encode($logRow, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+
+            header('Location: ' . $tripay['checkout_url']);
+            exit;
         }
     }
 
@@ -607,8 +711,8 @@ $biodata_query = http_build_query($biodata_query_params);
         </section>
     <?php else: ?>
         <section class="section-card">
-            <form id="formBiodata" method="post" action="detail_qurban.php?<?php echo htmlspecialchars($biodata_query, ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
-                <input type="hidden" name="konfirmasi_qurban_tf" value="1">
+            <form id="formBiodata" method="post" action="detail_qurban.php?<?php echo htmlspecialchars($biodata_query, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="buat_pembayaran_tripay" value="1">
                 <input type="hidden" name="program" value="<?php echo htmlspecialchars($programId); ?>">
                 <input type="hidden" name="qty" value="<?php echo (int)$qty; ?>">
                 <?php for ($hi = 1; $hi <= $qty; $hi++): ?>
@@ -616,9 +720,6 @@ $biodata_query = http_build_query($biodata_query_params);
                 <?php endfor; ?>
 
                 <h2 class="section-heading">Biodata Diri</h2>
-                <?php if ($konfirmasi_ok): ?>
-                    <div class="alert-konfirmasi ok" role="status">Konfirmasi berhasil dikirim. Bukti pembayaran telah kami terima. Tim akan menghubungi Anda melalui WhatsApp.</div>
-                <?php endif; ?>
                 <?php if ($konfirmasi_error !== ''): ?>
                     <div class="alert-konfirmasi err" role="alert"><?php echo htmlspecialchars($konfirmasi_error); ?></div>
                 <?php endif; ?>
@@ -640,15 +741,16 @@ $biodata_query = http_build_query($biodata_query_params);
                     <div class="note">Tidak lebih dari 90 karakter</div>
                 </div>
                 <div class="field">
-                    <label for="payment_method">Pilih Metode Pembayaran</label>
+                    <label for="payment_method">Pilih Channel Tripay</label>
                     <select id="payment_method" name="payment_method" required>
                         <option value=""<?php echo $repop['payment_method'] === '' ? ' selected' : ''; ?>>Pilih Pembayaran</option>
-                        <option value="qris"<?php echo $repop['payment_method'] === 'qris' ? ' selected' : ''; ?>>QRIS</option>
-                        <option value="bank_nagari"<?php echo $repop['payment_method'] === 'bank_nagari' ? ' selected' : ''; ?>>Bank Nagari Syariah</option>
-                        <option value="bsi"<?php echo $repop['payment_method'] === 'bsi' ? ' selected' : ''; ?>>BSI (Bank Syariah Indonesia)</option>
-                        <option value="bsn"<?php echo $repop['payment_method'] === 'bsn' ? ' selected' : ''; ?>>BSN (Bank Syariah Nasional)</option>
+                        <?php foreach ($tripay_methods as $methodCode => $methodLabel): ?>
+                            <option value="<?php echo htmlspecialchars($methodCode); ?>"<?php echo $repop['payment_method'] === $methodCode ? ' selected' : ''; ?>>
+                                <?php echo htmlspecialchars($methodLabel); ?>
+                            </option>
+                        <?php endforeach; ?>
                     </select>
-                    <div class="note">Untuk transfer bank, nomor rekening lengkap akan ditampilkan setelah Anda klik <strong>Kirim Konfirmasi</strong>.</div>
+                    <div class="note">Setelah klik tombol di bawah, sistem membuat invoice Tripay dan mengarahkan Anda ke halaman pembayaran.</div>
                 </div>
                 <div class="order-summary">
                     <h4>Detail Pesanan</h4>
@@ -659,7 +761,7 @@ $biodata_query = http_build_query($biodata_query_params);
                     <?php endfor; ?>
                     <div class="order-line"><strong>Total: <?php echo rupiah($total); ?></strong></div>
                 </div>
-                <button type="button" class="confirm-btn" id="btnKirimKonfirmasi">Kirim Konfirmasi</button>
+                <button type="submit" class="confirm-btn" id="btnKirimKonfirmasi">Lanjut Pembayaran Tripay</button>
             </form>
         </section>
     <?php endif; ?>
@@ -725,210 +827,18 @@ $biodata_query = http_build_query($biodata_query_params);
 })();
 </script>
 <?php else: ?>
-<div class="qris-modal" id="qrisModal" aria-hidden="true">
-    <div class="qris-modal-card" role="dialog" aria-modal="true" aria-labelledby="qrisModalTitle">
-        <h3 class="qris-modal-title" id="qrisModalTitle">Pembayaran QRIS</h3>
-        <p class="qris-modal-text">Silakan scan QRIS berikut untuk menyelesaikan pembayaran qurban Anda.</p>
-        <img src="assets/pembayaran/qris.jpeg" alt="Kode QRIS Pembayaran Qurban" class="qris-modal-image">
-        <button type="button" class="qris-modal-close" id="btnCloseQrisModal">Tutup</button>
-    </div>
-</div>
-<div class="qris-modal" id="tfModal" aria-hidden="true">
-    <div class="qris-modal-card" role="dialog" aria-modal="true" aria-labelledby="tfModalTitle">
-        <h3 class="qris-modal-title" id="tfModalTitle">Transfer ke rekening ini</h3>
-        <p class="qris-modal-text">Silakan transfer sesuai total pesanan. Setelah itu lampirkan bukti transfer, lalu klik <strong>Kirim</strong>.</p>
-        <div id="tfModalRek" class="tf-modal-rek"></div>
-        <div class="tf-modal-file">
-            <label for="inputBuktiTf">Lampirkan bukti di sini</label>
-            <input type="file" id="inputBuktiTf" name="bukti_tf" form="formBiodata" accept="image/jpeg,image/png,image/webp,application/pdf">
-        </div>
-        <button type="button" class="qris-modal-close" id="btnTfSubmit">Kirim</button>
-        <button type="button" class="tf-modal-ghost" id="btnTfClose">Batal</button>
-    </div>
-</div>
 <script>
 (function () {
-    var btnKirim = document.getElementById('btnKirimKonfirmasi');
-    var paymentMethod = document.getElementById('payment_method');
-    var qrisModal = document.getElementById('qrisModal');
-    var btnCloseModal = document.getElementById('btnCloseQrisModal');
-    var tfModal = document.getElementById('tfModal');
-    var btnTfClose = document.getElementById('btnTfClose');
-    var tfModalRek = document.getElementById('tfModalRek');
-    var inputBuktiTf = document.getElementById('inputBuktiTf');
-    var btnTfSubmit = document.getElementById('btnTfSubmit');
     var formBiodata = document.getElementById('formBiodata');
-    var fullNameEl = document.getElementById('full_name');
-    var phoneEl = document.getElementById('phone');
-    var paymentAccounts = {
-        bank_nagari: {
-            title: 'Bank Nagari Syariah',
-            account: '71000103001096',
-            owner: 'a.n Yayasan Rangkiang Peduli Negeri'
-        },
-        bsi: {
-            title: 'BSI (Bank Syariah Indonesia)',
-            account: '2222111784',
-            owner: 'a.n Rangkiang Peduli Negeri'
-        },
-        bsn: {
-            title: 'BSN (Bank Syariah Nasional)',
-            account: '2004542782',
-            owner: 'a.n Yayasan Rangkiang Peduli Negeri'
-        }
-    };
-
-    function escHtml(s) {
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-    }
-
-    /** Hanya dipakai di popup transfer (setelah klik Kirim Konfirmasi). Tombol Salin hanya untuk nomor rekening. */
-    function buildRekeningModalHtml(acc) {
-        return ''
-            + '<div class="rekening-block rekening-block--modal">'
-            + '<p class="tf-rek-line"><strong>' + escHtml(acc.title) + '</strong></p>'
-            + '<div class="copy-row copy-row--norek">'
-            + '<div class="copy-row-main">'
-            + '<span class="copy-muted">No. rekening</span><br>'
-            + '<strong class="js-copy-norek">' + escHtml(acc.account) + '</strong>'
-            + '</div>'
-            + '<button type="button" class="btn-copy-one btn-copy-norek" aria-label="Salin nomor rekening">Salin</button>'
-            + '</div>'
-            + '<p class="tf-rek-line">' + escHtml(acc.owner) + '</p>'
-            + '</div>';
-    }
-
-    function copyToClipboard(text, btn) {
-        function feedback() {
-            if (!btn) return;
-            var old = btn.textContent;
-            btn.textContent = 'Disalin!';
-            btn.disabled = true;
-            setTimeout(function () {
-                btn.textContent = old;
-                btn.disabled = false;
-            }, 1600);
-        }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(feedback).catch(function () {
-                fallbackCopy(text, feedback);
-            });
-        } else {
-            fallbackCopy(text, feedback);
-        }
-        function fallbackCopy(txt, cb) {
-            var ta = document.createElement('textarea');
-            ta.value = txt;
-            ta.setAttribute('readonly', '');
-            ta.style.position = 'fixed';
-            ta.style.left = '-9999px';
-            document.body.appendChild(ta);
-            ta.select();
-            try {
-                document.execCommand('copy');
-            } catch (e) {}
-            document.body.removeChild(ta);
-            if (cb) cb();
-        }
-    }
-
-    function setupNorekCopy(root) {
-        if (!root) return;
-        root.addEventListener('click', function (e) {
-            var btn = e.target.closest('.btn-copy-norek');
-            if (!btn) return;
-            e.preventDefault();
-            var row = btn.closest('.copy-row');
-            var src = row ? row.querySelector('.js-copy-norek') : null;
-            if (src) copyToClipboard(src.textContent.trim(), btn);
-        });
-    }
-
-    function closeQrisModal() {
-        qrisModal.classList.remove('is-open');
-        qrisModal.setAttribute('aria-hidden', 'true');
-    }
-
-    function openQrisModal() {
-        closeTfModal();
-        qrisModal.classList.add('is-open');
-        qrisModal.setAttribute('aria-hidden', 'false');
-    }
-
-    function closeTfModal() {
-        tfModal.classList.remove('is-open');
-        tfModal.setAttribute('aria-hidden', 'true');
-    }
-
-    function openTfModal() {
-        closeQrisModal();
-        var pay = paymentMethod.value;
-        var acc = paymentAccounts[pay];
-        if (!acc) return;
-        tfModalRek.innerHTML = buildRekeningModalHtml(acc);
-        tfModal.classList.add('is-open');
-        tfModal.setAttribute('aria-hidden', 'false');
-    }
-
-    btnCloseModal.addEventListener('click', closeQrisModal);
-    qrisModal.addEventListener('click', function (e) {
-        if (e.target === qrisModal) closeQrisModal();
-    });
-    btnTfClose.addEventListener('click', function () {
-        closeTfModal();
-        if (inputBuktiTf) inputBuktiTf.value = '';
-    });
-    tfModal.addEventListener('click', function (e) {
-        if (e.target === tfModal) {
-            closeTfModal();
-            if (inputBuktiTf) inputBuktiTf.value = '';
-        }
-    });
-    setupNorekCopy(tfModalRek);
-
-    btnTfSubmit.addEventListener('click', function () {
-        if (!inputBuktiTf || !formBiodata) return;
-        if (!inputBuktiTf.files || inputBuktiTf.files.length === 0) {
-            alert('Mohon lampirkan bukti transfer.');
-            inputBuktiTf.focus();
-            return;
-        }
+    var btnKirim = document.getElementById('btnKirimKonfirmasi');
+    if (!formBiodata || !btnKirim) return;
+    btnKirim.addEventListener('click', function () {
         if (typeof formBiodata.checkValidity === 'function' && !formBiodata.checkValidity()) {
             formBiodata.reportValidity();
             return;
         }
-        formBiodata.submit();
-    });
-
-    btnKirim.addEventListener('click', function () {
-        if (paymentMethod.value === '') {
-            alert('Silakan pilih metode pembayaran terlebih dahulu.');
-            paymentMethod.focus();
-            return;
-        }
-        if (!fullNameEl.value.trim()) {
-            alert('Mohon isi nama lengkap terlebih dahulu.');
-            fullNameEl.focus();
-            return;
-        }
-        if (!phoneEl.value.trim()) {
-            alert('Mohon isi nomor HP terlebih dahulu.');
-            phoneEl.focus();
-            return;
-        }
-        if (paymentMethod.value === 'qris') {
-            openQrisModal();
-            return;
-        }
-        if (paymentAccounts[paymentMethod.value]) {
-            openTfModal();
-            return;
-        }
-        alert('Silakan pilih metode pembayaran yang tersedia.');
+        btnKirim.disabled = true;
+        btnKirim.textContent = 'Membuat transaksi Tripay...';
     });
 })();
 </script>
