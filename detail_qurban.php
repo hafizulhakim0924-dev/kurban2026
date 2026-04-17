@@ -102,14 +102,63 @@ function qurban_send_watzap_message(string $phoneWa, string $message): array {
 }
 
 function qurban_tripay_methods(): array {
-    return [
-        'QRIS' => 'Tripay QRIS',
-        'BRIVA' => 'BRI Virtual Account',
-        'BNIVA' => 'BNI Virtual Account',
-        'BSIVA' => 'BSI Virtual Account',
-        'MANDIRIVA' => 'Mandiri Virtual Account',
-        'PERMATAVA' => 'Permata Virtual Account',
+    $fallback = [
+        'QRIS' => 'Tripay - QRIS',
+        'BRIVA' => 'Tripay - BRI Virtual Account',
+        'BNIVA' => 'Tripay - BNI Virtual Account',
+        'BSIVA' => 'Tripay - BSI Virtual Account',
+        'MANDIRIVA' => 'Tripay - Mandiri Virtual Account',
+        'PERMATAVA' => 'Tripay - Permata Virtual Account',
     ];
+
+    $apiKey = qurban_secret('TRIPAY_API_KEY');
+    $apiBase = rtrim(qurban_secret('TRIPAY_API_BASE', 'https://tripay.co.id/api'), '/');
+    if ($apiKey === '') {
+        return $fallback;
+    }
+
+    $ch = curl_init($apiBase . '/merchant/payment-channel');
+    if ($ch === false) {
+        return $fallback;
+    }
+    curl_setopt_array($ch, [
+        CURLOPT_HTTPGET => true,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $apiKey,
+            'Accept: application/json',
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    $statusCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if (!is_string($response) || $response === '' || $statusCode < 200 || $statusCode >= 300) {
+        return $fallback;
+    }
+
+    $decoded = json_decode($response, true);
+    if (!is_array($decoded) || empty($decoded['success']) || !isset($decoded['data']) || !is_array($decoded['data'])) {
+        return $fallback;
+    }
+
+    $channels = [];
+    foreach ($decoded['data'] as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (isset($row['active']) && $row['active'] === false) {
+            continue;
+        }
+        $code = isset($row['code']) ? trim((string)$row['code']) : '';
+        $name = isset($row['name']) ? trim((string)$row['name']) : '';
+        if ($code === '' || $name === '') {
+            continue;
+        }
+        $channels[$code] = 'Tripay - ' . $name;
+    }
+
+    return count($channels) > 0 ? $channels : $fallback;
 }
 
 function qurban_current_base_url(): string {
@@ -743,7 +792,7 @@ $biodata_query = http_build_query($biodata_query_params);
                 <div class="field">
                     <label for="payment_method">Pilih Channel Tripay</label>
                     <select id="payment_method" name="payment_method" required>
-                        <option value=""<?php echo $repop['payment_method'] === '' ? ' selected' : ''; ?>>Pilih Pembayaran</option>
+                        <option value=""<?php echo $repop['payment_method'] === '' ? ' selected' : ''; ?>>Pilih Metode Tripay</option>
                         <?php foreach ($tripay_methods as $methodCode => $methodLabel): ?>
                             <option value="<?php echo htmlspecialchars($methodCode); ?>"<?php echo $repop['payment_method'] === $methodCode ? ' selected' : ''; ?>>
                                 <?php echo htmlspecialchars($methodLabel); ?>
