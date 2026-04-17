@@ -1,0 +1,17 @@
+# Pretty URL afiliasi: https://qurban.kolaboraksi.com/namaaffiliator
+# -> memuat index.php?ref=namaaffiliator (logika referral tidak berubah)
+#
+# Jika entry halaman qurban Anda adalah qurban.php, ganti "index.php" di RewriteRule bawah.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Jangan ubah permintaan ke file atau folder yang benar-benar ada
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Hanya satu segmen path, huruf kecil/angka/tanda hubung, 3–40 karakter (selaras dengan validasi slug di PHP)
+    RewriteRule ^([a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?)/?$ index.php?ref=$1 [L,QSA]
+</IfModule>
