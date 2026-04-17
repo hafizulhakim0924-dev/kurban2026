@@ -471,41 +471,6 @@ $biodata_query = http_build_query($biodata_query_params);
         .person-item input, .field input, .field textarea, .field select { width: 100%; border: 1px solid #d8e3ed; border-radius: 10px; padding: 11px 12px; font-size: 14px; line-height: 1.45; font-family: inherit; background: #fff; }
         .field { margin-bottom: 13px; }
         .note { font-size: 11px; color: #475569; margin-top: 5px; line-height: 1.5; }
-        .rekening-block { margin-top: 4px; }
-        .copy-row {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-        .copy-row:last-of-type { margin-bottom: 8px; }
-        .copy-row-main { flex: 1; min-width: 0; font-size: 12px; color: #334155; line-height: 1.45; }
-        .copy-muted { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 2px; }
-        .copy-row-main .js-copy-source strong { color: #0b5f56; font-size: 13px; }
-        .btn-copy-one {
-            flex-shrink: 0;
-            margin-top: 14px;
-            padding: 6px 10px;
-            font-size: 11px;
-            font-weight: 700;
-            border: 1px solid #0b6b61;
-            background: #eef8f6;
-            color: #0b5f56;
-            border-radius: 8px;
-            cursor: pointer;
-            font-family: inherit;
-        }
-        .btn-copy-one:hover { background: #dff5f0; }
-        .btn-copy-one:focus-visible { outline: 3px solid #0f5d8f; outline-offset: 2px; }
-        .tf-rek-line {
-            margin: 0 0 10px;
-            font-size: 13px;
-            color: #334155;
-            line-height: 1.45;
-        }
-        .tf-rek-line:last-of-type { margin-bottom: 0; }
-        .copy-row--norek .btn-copy-one { margin-top: 18px; }
         .order-summary {
             border: 1px solid #dfe8f1;
             border-radius: 12px;
@@ -533,103 +498,12 @@ $biodata_query = http_build_query($biodata_query_params);
         .cart-table td { font-size: 12px; padding: 7px 0; border-top: 1px solid #ebf1f6; vertical-align: top; }
         .cart-table td:last-child { text-align: right; font-weight: 700; color: #1f7db9; }
         .confirm-btn { width: 100%; margin-top: 12px; border: none; border-radius: 10px; padding: 12px; font-size: 14px; font-weight: 700; background: #0b6b61; color: #fff; cursor: pointer; }
-        .qris-modal {
-            position: fixed;
-            inset: 0;
-            background: rgba(12, 21, 31, 0.62);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 18px;
-            z-index: 100;
-        }
-        .qris-modal.is-open { display: flex; }
-        .qris-modal-card {
-            width: 100%;
-            max-width: 360px;
-            background: #fff;
-            border-radius: 14px;
-            border: 1px solid #dce6ef;
-            box-shadow: 0 10px 26px rgba(0,0,0,.17);
-            padding: 14px;
-        }
-        .qris-modal-title {
-            margin: 0 0 6px;
-            color: #0b5f56;
-            font-size: 16px;
-            font-weight: 700;
-        }
-        .qris-modal-text {
-            margin: 0 0 10px;
-            color: #334155;
-            font-size: 12px;
-            line-height: 1.5;
-        }
-        .qris-modal-image {
-            width: 100%;
-            display: block;
-            border-radius: 10px;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-            margin-bottom: 10px;
-        }
-        .qris-modal-close {
-            width: 100%;
-            border: none;
-            border-radius: 10px;
-            padding: 11px 12px;
-            font-size: 14px;
-            font-weight: 700;
-            background: #0b6b61;
-            color: #fff;
-            cursor: pointer;
-        }
-        .tf-modal-ghost {
-            width: 100%;
-            margin-top: 8px;
-            border: 1px solid #cbd5e1;
-            border-radius: 10px;
-            padding: 10px 12px;
-            font-size: 13px;
-            font-weight: 600;
-            background: #f8fafc;
-            color: #334155;
-            cursor: pointer;
-        }
-        .tf-modal-rek {
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 10px;
-            background: #f8fbff;
-            margin-bottom: 12px;
-        }
-        .tf-modal-rek p { margin: 0 0 4px; font-size: 13px; color: #334155; line-height: 1.45; }
-        .tf-modal-rek p:last-child { margin-bottom: 0; }
-        .tf-modal-rek strong { color: #0b5f56; }
-        .tf-modal-file { margin-bottom: 12px; }
-        .tf-modal-file label {
-            display: block;
-            font-size: 12px;
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 6px;
-        }
-        .tf-modal-file input[type="file"] {
-            width: 100%;
-            font-size: 13px;
-            color: #334155;
-        }
         .alert-konfirmasi {
             border-radius: 10px;
             padding: 10px 12px;
             margin-bottom: 12px;
             font-size: 13px;
             line-height: 1.45;
-        }
-        .alert-konfirmasi.ok {
-            background: #ecfdf5;
-            border: 1px solid #6ee7b7;
-            color: #065f46;
         }
         .alert-konfirmasi.err {
             background: #fef2f2;
@@ -643,7 +517,6 @@ $biodata_query = http_build_query($biodata_query_params);
             .qty-btn { width: 40px; height: 40px; font-size: 22px; }
             .qty-value { width: 46px; height: 40px; font-size: 16px; }
             .total-live { font-size: 14px; }
-            .qris-modal-title { font-size: 15px; }
         }
         .list { margin: 12px; display: grid; gap: 10px; }
         .item { background: #fff; border: 1px solid #e2e8ed; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 130px 1fr; gap: 10px; text-decoration: none; color: inherit; }
