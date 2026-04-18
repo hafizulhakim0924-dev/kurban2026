@@ -101,15 +101,10 @@ function qurban_send_watzap_message(string $phoneWa, string $message): array {
     return ['ok' => $ok, 'status_code' => $statusCode, 'response' => (string)$response, 'error' => $ok ? '' : 'HTTP ' . $statusCode];
 }
 
-function qurban_tripay_methods(): array {
-    return [
-        'QRIS' => 'Tripay - QRIS',
-        'BRIVA' => 'Tripay - BRI Virtual Account',
-        'BNIVA' => 'Tripay - BNI Virtual Account',
-        'BSIVA' => 'Tripay - BSI Virtual Account',
-        'MANDIRIVA' => 'Tripay - Mandiri Virtual Account',
-        'PERMATAVA' => 'Tripay - Permata Virtual Account',
-    ];
+/** Kode channel Tripay untuk transaksi (tanpa pilihan di form). Set di TRIPAY_DEFAULT_METHOD atau default QRIS. */
+function qurban_default_tripay_method(): string {
+    $m = qurban_secret('TRIPAY_DEFAULT_METHOD', 'QRIS');
+    return $m !== '' ? $m : 'QRIS';
 }
 
 function qurban_current_base_url(): string {
@@ -315,13 +310,11 @@ for ($i = 1; $i <= $qty; $i++) {
 }
 $total = $qty * (int)$program['price_int'];
 
-$tripay_methods = qurban_tripay_methods();
 $konfirmasi_error = '';
 $repop = [
     'full_name' => '',
     'phone' => '',
     'doa' => '',
-    'payment_method' => '',
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['buat_pembayaran_tripay']) && (string)$_POST['buat_pembayaran_tripay'] === '1') {
@@ -333,12 +326,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['buat_pembayaran_tripa
     if ($pQty > 20) {
         $pQty = 20;
     }
-    $pay = isset($_POST['payment_method']) ? trim((string)$_POST['payment_method']) : '';
+    $pay = qurban_default_tripay_method();
 
     $repop['full_name'] = trim((string)($_POST['full_name'] ?? ''));
     $repop['phone'] = trim((string)($_POST['phone'] ?? ''));
     $repop['doa'] = trim((string)($_POST['doa'] ?? ''));
-    $repop['payment_method'] = $pay;
 
     $postPekurban = [];
     for ($i = 1; $i <= $pQty; $i++) {
@@ -348,8 +340,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['buat_pembayaran_tripa
 
     if ($postProg === '' || !isset($qurban_programs[$postProg])) {
         $konfirmasi_error = 'Program tidak valid. Silakan ulangi dari halaman detail.';
-    } elseif (!isset($tripay_methods[$pay])) {
-        $konfirmasi_error = 'Pilih channel pembayaran Tripay yang tersedia.';
     } elseif ($repop['full_name'] === '' || $repop['phone'] === '') {
         $konfirmasi_error = 'Nama lengkap dan nomor HP wajib diisi.';
     } else {
@@ -385,7 +375,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['buat_pembayaran_tripa
                 'nama' => $repop['full_name'],
                 'hp' => $repop['phone'],
                 'doa' => mb_substr($repop['doa'], 0, 200),
-                'payment_method' => $pay,
+                'tripay_method' => $pay,
                 'tripay_reference' => $tripay['reference'],
                 'tripay_merchant_ref' => $tripay['merchant_ref'],
                 'tripay_checkout_url' => $tripay['checkout_url'],
@@ -612,18 +602,6 @@ $biodata_query = http_build_query($biodata_query_params);
                     <label for="doa">Doa dan Harapan</label>
                     <textarea id="doa" name="doa" maxlength="90" placeholder="Tidak lebih dari 90 karakter"><?php echo htmlspecialchars($repop['doa']); ?></textarea>
                     <div class="note">Tidak lebih dari 90 karakter</div>
-                </div>
-                <div class="field">
-                    <label for="payment_method">Pilih Metode Pembayaran (Tripay Only)</label>
-                    <select id="payment_method" name="payment_method" required>
-                        <option value=""<?php echo $repop['payment_method'] === '' ? ' selected' : ''; ?>>Pilih Metode Tripay</option>
-                        <?php foreach ($tripay_methods as $methodCode => $methodLabel): ?>
-                            <option value="<?php echo htmlspecialchars($methodCode); ?>"<?php echo $repop['payment_method'] === $methodCode ? ' selected' : ''; ?>>
-                                <?php echo htmlspecialchars($methodLabel); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div class="note">Tidak ada lagi pembayaran manual. Semua pembayaran diproses melalui gateway Tripay.</div>
                 </div>
                 <div class="order-summary">
                     <h4>Detail Pesanan</h4>
